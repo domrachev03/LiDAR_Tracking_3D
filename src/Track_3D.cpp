@@ -644,7 +644,14 @@ float getVar(std::vector<float> v, float m){
     });
     return (accum / (v.size()-1));
 }
-
+/*
+(!(RowsAtCompileTime!=Dynamic) || (rows==RowsAtCompileTime)) && 
+(!(ColsAtCompileTime!=Dynamic) || (cols==ColsAtCompileTime)) && 
+(!(RowsAtCompileTime==Dynamic && MaxRowsAtCompileTime!=Dynamic) || 
+  (rows<=MaxRowsAtCompileTime)) && 
+  (!(ColsAtCompileTime==Dynamic && MaxColsAtCompileTime!=Dynamic) || (cols<=MaxColsAtCompileTime)) 
+&& rows>=0 && cols>=0 && "Invalid sizes when resizing a matrix or array."
+*/
 pcl::PointCloud<pcl::Normal> getNormals(pcl::PointCloud<OusterPoint> member_points){
     pcl::PointCloud<pcl::Normal>::Ptr normals (new pcl::PointCloud<pcl::Normal>);
     pcl::PointCloud<OusterPoint>::Ptr cloud (new pcl::PointCloud<OusterPoint> (member_points));
@@ -687,16 +694,20 @@ void createSupervoxels(std::vector<Voxel> voxel_list, std::vector<SuperVoxel> * 
             ambient_vector.push_back((float)point.ambient);
             range_vector.push_back((float)point.range);
         }
+        ROS_INFO("  Computing supervoxels mean");
         supervoxel.mean_intensity = getMean(intensity_vector);
         supervoxel.mean_reflectivity = getMean(reflectivity_vector);
         supervoxel.mean_ambient = getMean(ambient_vector);
         supervoxel.mean_range = getMean(range_vector)/1000.0f;
+        ROS_INFO("  Computing supervoxels variance");
         supervoxel.var_intensity = getVar(intensity_vector,supervoxel.mean_intensity);
         supervoxel.var_reflectivity = getVar(reflectivity_vector,supervoxel.mean_reflectivity);
         supervoxel.var_ambient = getVar(ambient_vector,supervoxel.mean_ambient);
        //supervoxel.normals = getNormals(voxel.member_points);
+        ROS_INFO("  Computing normal center");
         supervoxel.normal = getNormalCenter(voxel.member_points, voxel.center);
         //eliminate ground
+        ROS_INFO("  Ground elimination");
         if(eliminateGround){
             Eigen::Vector4f normalGround;
             normalGround(0,0) = 0.0f;
@@ -1344,17 +1355,86 @@ void trackOps(std::unordered_map<int,Object> * object_list, std::unordered_map<i
 //     std::cout << "new tracked center " <<track_map[0].tracked_centroid_seq[lastKeyCentroid](0) << " , " <<track_map[0].tracked_centroid_seq[lastKeyCentroid](1) << std::endl;
 // }
 }
+bool ouster_cmp(OusterPoint p1, OusterPoint p2) {
+    return p1.data[0] > p2.data[0];
+}
+void organize_pointcloud(const pcl::PointCloud<OusterPoint>::Ptr unorganized_pcl, 
+                                                     float height_step = 0.4) {
+    // Setup for Velodyne HDL-64e, which was used in KITTI dataset
+    double t_begin = ros::Time::now().toSec();
+    uint32_t n_points = unorganized_pcl->width; 
 
-void 
-cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
+    float min_values_per_channel[4];
+    std::copy(std::begin(unorganized_pcl->points[0].data), std::end(unorganized_pcl->points[0].data), std::begin(min_values_per_channel));
+    float max_values_per_channel[4];
+    std::copy(std::begin(min_values_per_channel), std::end(min_values_per_channel), std::begin(max_values_per_channel));
+
+    for(int i = 0; i < n_points; ++i) {
+        for (int k = 0; k < 4; ++k) {
+            min_values_per_channel[k] = std::min(min_values_per_channel[k], unorganized_pcl->points[i].data[k]);
+            max_values_per_channel[k] = std::max(max_values_per_channel[k], unorganized_pcl->points[i].data[k]);
+        }
+    }
+    int n_spans = (int)((max_values_per_channel[2] - min_values_per_channel[2]) / height_step);
+
+    std::vector<float> height_span(n_spans);
+    float cur_span_value = min_values_per_channel[2];
+    int idx = 0;
+    while (cur_span_value < max_values_per_channel[2]) {
+        height_span[idx] = cur_span_value;
+        cur_span_value += height_step;
+        ++idx;
+    }
+    ROS_INFO("%d", n_spans);
+    std::vector<std::vector<OusterPoint>> organized_pcl_points(n_spans, std::vector<OusterPoint>(0));
+    ROS_INFO("Starting separation by layers");
+    for(auto p_it = (unorganized_pcl->points).begin(); p_it != (unorganized_pcl->points).end(); ++p_it) {
+        float cur_height = p_it->data[2];
+        int lb_idx = std::lower_bound(height_span.begin(), height_span.end(), cur_height) - height_span.begin();
+        int ub_idx = std::upper_bound(height_span.begin(), height_span.end(), cur_height) - height_span.begin();
+        ROS_INFO("%d, %d", lb_idx, ub_idx);
+        int cur_height_idx;
+        if (lb_idx == n_spans) {
+            cur_height_idx = 0;
+        } else if (ub_idx == n_spans) {
+            cur_height_idx = n_spans - 1;
+        } else {
+            cur_height_idx = (cur_height - height_span[lb_idx] > height_span[ub_idx] - cur_height) ? lb_idx : ub_idx; 
+        }
+        ROS_INFO("???");
+        organized_pcl_points[cur_height_idx].push_back(*p_it);
+    }
+    ROS_INFO("Data collected!");
+    for(auto row_it = organized_pcl_points.begin(); row_it != organized_pcl_points.end(); ++row_it) {
+        std::sort(row_it->begin(), row_it->end(), ouster_cmp);
+        for (int i = 0; i < row_it->size(); ++i) {
+            ROS_INFO("%f %f %f %f", (*row_it)[i].data[0], (*row_it)[i].data[1], (*row_it)[i].data[2], (*row_it)[i]. data[3]);
+            if (i > 10) {
+                break;  
+            }
+        }
+    }    
+    ROS_INFO("Computation time: %f" , ros::Time::now().toSec() - t_begin);
+}
+
+void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& pcl)
 {
-    std::cout << "frame start: " << f << std::endl;  
+    ROS_INFO("Frame processing init");  
+    ROS_INFO("%u %u", pcl->width, pcl->height);
     // conversion:
     pcl::PointCloud<OusterPoint>::Ptr cloudComplete (new pcl::PointCloud<OusterPoint>);
-    pcl::fromROSMsg (*input, *cloudComplete);
+    pcl::fromROSMsg (*pcl, *cloudComplete);
+    if (!cloudComplete->isOrganized()) {
+        ROS_WARN("Pointcloud is not organized. This might decrease the performance");
+        organize_pointcloud(cloudComplete);
+        assert(false);
+    }
+    ROS_INFO("Initializing and filering plc");
     initialize(cloudComplete);
     cloud_filter(cloudComplete);
     demeanCloud(cloudComplete);
+    
+    ROS_INFO("Computing regions of interesn in plc");
     pcl::PointCloud<OusterPoint>::Ptr cloudROI (new pcl::PointCloud<OusterPoint>);
     std::vector<Voxel> voxel_list;
     // tracking
@@ -1362,12 +1442,16 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
     //
     findVoxelsDimensions(&voxel_list);
     std::vector<SuperVoxel> supervoxel_list;
-    bool eliminateGround = true;
+    // TODO: it was true, resulting in Error
+    bool eliminateGround = false;
+    ROS_INFO("Voxelisation");
     createSupervoxels(voxel_list, &supervoxel_list, eliminateGround);
     std::vector<Chain> chain_list;
+    ROS_INFO("Finding chains");
     findChains(supervoxel_list, &chain_list);
     //std::cout << "number of chains " << chain_list.size() << std::endl;
     std::unordered_map<int,Object> object_list;
+    ROS_INFO("Segmentation");
     segmentObjects(&chain_list, &object_list);
     std::unordered_map<int,Object> object_list_filtered;
     joinRedundantObjects(&object_list, &object_list_filtered);
@@ -1375,8 +1459,10 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
     if(checkError(object_vox_count, chain_list.size(), false)){
         trySolveError(&object_list_filtered, chain_list.size());
         }  
+    ROS_INFO("Object detection");
     findObjectAtt(&object_list_filtered);
     findObjectDimensions(&object_list_filtered);
+    ROS_INFO("Running classifiers");
     //std::cout <<" number of objects in roi " << object_list_filtered.size() << std::endl;
     shapeClassifier(&object_list_filtered);
     normalClassifier(&object_list_filtered);
@@ -1397,8 +1483,8 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
     sensor_msgs::PointCloud2 cloud_roi;
     pcl::toROSMsg(*cloudROI,cloud_roi); 
     pcl::toROSMsg(cloud_output, output);
-    output.header = input->header;
-    cloud_roi.header = input->header;
+    output.header = pcl->header;
+    cloud_roi.header = pcl->header;
     pub.publish(marker_array);
     pub2.publish(cloud_roi);
     pub3.publish(output);
@@ -1411,7 +1497,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
 int main (int argc, char** argv)
 {
   // Initialize ROS
-  ros::init (argc, argv, "listener");
+  ros::init (argc, argv, "lidar_tracking");
   ros::NodeHandle nh("/lidar_tracking");
   
   std::string pcl_topic;
@@ -1426,8 +1512,9 @@ int main (int argc, char** argv)
   pub2 = nh.advertise<sensor_msgs::PointCloud2>("roi", 1);
   pub4 = nh.advertise<visualization_msgs::MarkerArray>("centroids", 1);
 
+  ros::Rate sleep_rate(0.1);
   // Spin
   ros::spin ();
   std::cout << "track dropps "<< track_dropped <<std::endl;
-  std::cout << "no found "<< no_person_found <<std::endl;
+  std::cout << "no found "<< no_person_found <<std::endl; 
 }
