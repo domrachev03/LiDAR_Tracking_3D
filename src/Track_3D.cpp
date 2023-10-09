@@ -1348,50 +1348,50 @@ void trackOps(std::unordered_map<int,Object> * object_list, std::unordered_map<i
 void 
 cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
 {
-  std::cout << "frame start: " << f << std::endl;  
-  // conversion:
-  pcl::PointCloud<OusterPoint>::Ptr cloudComplete (new pcl::PointCloud<OusterPoint>);
-  pcl::fromROSMsg (*input, *cloudComplete);
-  initialize(cloudComplete);
-  cloud_filter(cloudComplete);
-  demeanCloud(cloudComplete);
-  pcl::PointCloud<OusterPoint>::Ptr cloudROI (new pcl::PointCloud<OusterPoint>);
-  std::vector<Voxel> voxel_list;
-  // tracking
-  findVoxelList(cloudComplete, cloudROI, &voxel_list);
-  //
-  findVoxelsDimensions(&voxel_list);
-  std::vector<SuperVoxel> supervoxel_list;
-  bool eliminateGround = true;
-  createSupervoxels(voxel_list, &supervoxel_list, eliminateGround);
-  std::vector<Chain> chain_list;
-  findChains(supervoxel_list, &chain_list);
-  //std::cout << "number of chains " << chain_list.size() << std::endl;
-  std::unordered_map<int,Object> object_list;
-  segmentObjects(&chain_list, &object_list);
-  std::unordered_map<int,Object> object_list_filtered;
-  joinRedundantObjects(&object_list, &object_list_filtered);
-  unsigned int object_vox_count = displayObjectInfo(object_list_filtered);
-  if(checkError(object_vox_count, chain_list.size(), false)){
-      trySolveError(&object_list_filtered, chain_list.size());
-    }  
-  findObjectAtt(&object_list_filtered);
-  findObjectDimensions(&object_list_filtered);
-  //std::cout <<" number of objects in roi " << object_list_filtered.size() << std::endl;
-  shapeClassifier(&object_list_filtered);
-  normalClassifier(&object_list_filtered);
-  shadowClassifier(&object_list_filtered);
-  std::unordered_map<int,Object> detected_person;
-  fillDetectedPerson(object_list_filtered, &detected_person);
-  //std::cout << "nb detected person with classification "<< detected_person.size() << std::endl;
-  //// tracking 2
-  trackOps(&object_list_filtered, &detected_person, voxel_list);
-  /////
-  visualization_msgs::MarkerArray marker_array;
-  pcl::PointCloud<OusterPoint> cloud_output;
-  bool show_normals = false;
-  makeOutputs(&object_list_filtered, detected_person, &marker_array, &cloud_output, cloudComplete ,cloudROI,show_normals);
-  //Publish the data.
+    std::cout << "frame start: " << f << std::endl;  
+    // conversion:
+    pcl::PointCloud<OusterPoint>::Ptr cloudComplete (new pcl::PointCloud<OusterPoint>);
+    pcl::fromROSMsg (*input, *cloudComplete);
+    initialize(cloudComplete);
+    cloud_filter(cloudComplete);
+    demeanCloud(cloudComplete);
+    pcl::PointCloud<OusterPoint>::Ptr cloudROI (new pcl::PointCloud<OusterPoint>);
+    std::vector<Voxel> voxel_list;
+    // tracking
+    findVoxelList(cloudComplete, cloudROI, &voxel_list);
+    //
+    findVoxelsDimensions(&voxel_list);
+    std::vector<SuperVoxel> supervoxel_list;
+    bool eliminateGround = true;
+    createSupervoxels(voxel_list, &supervoxel_list, eliminateGround);
+    std::vector<Chain> chain_list;
+    findChains(supervoxel_list, &chain_list);
+    //std::cout << "number of chains " << chain_list.size() << std::endl;
+    std::unordered_map<int,Object> object_list;
+    segmentObjects(&chain_list, &object_list);
+    std::unordered_map<int,Object> object_list_filtered;
+    joinRedundantObjects(&object_list, &object_list_filtered);
+    unsigned int object_vox_count = displayObjectInfo(object_list_filtered);
+    if(checkError(object_vox_count, chain_list.size(), false)){
+        trySolveError(&object_list_filtered, chain_list.size());
+        }  
+    findObjectAtt(&object_list_filtered);
+    findObjectDimensions(&object_list_filtered);
+    //std::cout <<" number of objects in roi " << object_list_filtered.size() << std::endl;
+    shapeClassifier(&object_list_filtered);
+    normalClassifier(&object_list_filtered);
+    shadowClassifier(&object_list_filtered);
+    std::unordered_map<int,Object> detected_person;
+    fillDetectedPerson(object_list_filtered, &detected_person);
+    //std::cout << "nb detected person with classification "<< detected_person.size() << std::endl;
+    //// tracking 2
+    trackOps(&object_list_filtered, &detected_person, voxel_list);
+    /////
+    visualization_msgs::MarkerArray marker_array;
+    pcl::PointCloud<OusterPoint> cloud_output;
+    bool show_normals = false;
+    makeOutputs(&object_list_filtered, detected_person, &marker_array, &cloud_output, cloudComplete ,cloudROI,show_normals);
+    //Publish the data.
     ros::Rate loop_rate(10);
     sensor_msgs::PointCloud2 output;
     sensor_msgs::PointCloud2 cloud_roi;
@@ -1406,25 +1406,25 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
     f = f + 1;
     ros::spinOnce();
     loop_rate.sleep();
-
 }
 
-int
-main (int argc, char** argv)
+int main (int argc, char** argv)
 {
   // Initialize ROS
   ros::init (argc, argv, "listener");
-  ros::NodeHandle nh;
-
+  ros::NodeHandle nh("/lidar_tracking");
+  
+  std::string pcl_topic;
+  nh.param("/Track_3D/input", pcl_topic, std::string("/ouster/points"));
   // Create a ROS subscriber for the input point cloud
-  ros::Subscriber sub = nh.subscribe ("input", 1, cloud_cb);
+  ros::Subscriber sub = nh.subscribe(pcl_topic, 1, cloud_cb);
 
   // Create a ROS publisher for the output point cloud
 
-    pub3 = nh.advertise<sensor_msgs::PointCloud2> ("output", 1);
-    pub = nh.advertise<visualization_msgs::MarkerArray> ("visualization_marker_array",1);
-    pub2 = nh.advertise<sensor_msgs::PointCloud2>("roi", 1);
-    pub4 = nh.advertise<visualization_msgs::MarkerArray>("centroids", 1);
+  pub3 = nh.advertise<sensor_msgs::PointCloud2> ("output", 1);
+  pub = nh.advertise<visualization_msgs::MarkerArray> ("visualization_marker_array",1);
+  pub2 = nh.advertise<sensor_msgs::PointCloud2>("roi", 1);
+  pub4 = nh.advertise<visualization_msgs::MarkerArray>("centroids", 1);
 
   // Spin
   ros::spin ();
