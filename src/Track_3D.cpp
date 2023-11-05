@@ -1385,9 +1385,7 @@ void organize_pointcloud(const pcl::PointCloud<OusterPoint>::Ptr unorganized_pcl
         cur_span_value += height_step;
         ++idx;
     }
-    ROS_INFO("%d", n_spans);
     std::vector<std::vector<OusterPoint>> organized_pcl_points(n_spans, std::vector<OusterPoint>(0));
-    ROS_INFO("Starting separation by layers");
     for(auto p_it = (unorganized_pcl->points).begin(); p_it != (unorganized_pcl->points).end(); ++p_it) {
         float cur_height = p_it->data[2];
         int lb_idx = std::lower_bound(height_span.begin(), height_span.end(), cur_height) - height_span.begin();
@@ -1401,10 +1399,8 @@ void organize_pointcloud(const pcl::PointCloud<OusterPoint>::Ptr unorganized_pcl
         } else {
             cur_height_idx = (cur_height - height_span[lb_idx] > height_span[ub_idx] - cur_height) ? lb_idx : ub_idx; 
         }
-        ROS_INFO("???");
         organized_pcl_points[cur_height_idx].push_back(*p_it);
     }
-    ROS_INFO("Data collected!");
     for(auto row_it = organized_pcl_points.begin(); row_it != organized_pcl_points.end(); ++row_it) {
         std::sort(row_it->begin(), row_it->end(), ouster_cmp);
         for (int i = 0; i < row_it->size(); ++i) {
@@ -1414,7 +1410,6 @@ void organize_pointcloud(const pcl::PointCloud<OusterPoint>::Ptr unorganized_pcl
             }
         }
     }    
-    ROS_INFO("Computation time: %f" , ros::Time::now().toSec() - t_begin);
 }
 
 void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& pcl)
@@ -1424,11 +1419,10 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& pcl)
     // conversion:
     pcl::PointCloud<OusterPoint>::Ptr cloudComplete (new pcl::PointCloud<OusterPoint>);
     pcl::fromROSMsg (*pcl, *cloudComplete);
-    if (!cloudComplete->isOrganized()) {
-        ROS_WARN("Pointcloud is not organized. This might decrease the performance");
-        organize_pointcloud(cloudComplete);
-        assert(false);
-    }
+    // if (!cloudComplete->isOrganized()) {
+    //     ROS_WARN("Pointcloud is not organized. This might decrease the performance");
+    //     organize_pointcloud(cloudComplete);
+    // }
     ROS_INFO("Initializing and filering plc");
     initialize(cloudComplete);
     cloud_filter(cloudComplete);
